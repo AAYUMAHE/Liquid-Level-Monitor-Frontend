@@ -4,7 +4,7 @@ import axios from 'axios'
 // ============================================
 // SINGLETON STATE (module-level refs)
 // ============================================
-const backendUrl = 'http://10.42.169.222:8000'
+const backendUrl = 'http://10.42.171.236:8000'
 
 const status = ref('IDLE')
 const isRunning = ref(false)
@@ -44,7 +44,17 @@ const hasRoi = ref(false)
 const currentRoi = ref({ x1: 0, y1: 0, x2: 0, y2: 0 })
 const roiFrameData = ref(null)
 
-let pollingInterval = null
+// ============================================
+// SAVE / EXPORT CONFIGURATION STATE
+// ============================================
+const outputFolder = ref('session_output')
+const saveFrames = ref(true)
+const saveExcel = ref(true)
+const saveChart = ref(true)
+const localSaveDirHandle = ref(null)   // File System Access API directory handle
+const autoSaveStatus = ref('')         // 'saving' | 'idle' | 'error'
+let autoSaveInterval = null
+let savedFrameCount = 0
 
 // ============================================
 // COMPUTED
@@ -88,9 +98,17 @@ const isCriticalAlert = computed(() => {
 
 const videoUrl = computed(() => isRunning.value ? `${backendUrl}/video_feed` : '')
 
-// ============================================
-// SMOOTHING STATE (for cylinder animation)
-// ============================================
+// Save All computed toggle
+const saveAll = computed({
+  get: () => saveFrames.value && saveExcel.value && saveChart.value,
+  set: (val) => {
+    saveFrames.value = val
+    saveExcel.value = val
+    saveChart.value = val
+  }
+})
+
+let pollingInterval = null
 let targetLevel = 0
 let smoothedTarget = 0
 let levelHistory = []
@@ -181,7 +199,12 @@ const startSystem = async () => {
 
     const source = sourceMode.value === 'camera' ? '0' : uploadedFilePath.value
     const res = await axios.post(`${backendUrl}/start`, null, {
-      params: { source, calibration: calibration.value, fps: targetFps.value }
+      params: {
+        source,
+        calibration: calibration.value,
+        fps: targetFps.value,
+        output_folder: outputFolder.value || 'session_output'
+      }
     })
 
     if (res.data.success === false) {
@@ -193,6 +216,12 @@ const startSystem = async () => {
     isRunning.value = true
     status.value = 'RUNNING'
     startPolling()
+
+    // Start auto-saving frames to local folder if configured
+    if (saveFrames.value && localSaveDirHandle.value) {
+      startAutoSaving()
+    }
+
     return true
   } catch (e) {
     status.value = 'ERROR'
@@ -204,6 +233,7 @@ const startSystem = async () => {
 
 const stopSystem = async () => {
   try {
+    stopAutoSaving()
     await axios.post(`${backendUrl}/stop`)
     isRunning.value = false
     status.value = 'STOPPED'
@@ -212,6 +242,17 @@ const stopSystem = async () => {
     level.value = null
     smoothedTarget = 0
     trendData.value = []
+
+    // Auto-download selected items after session ends
+    setTimeout(async () => {
+      if (saveExcel.value) {
+        window.open(`${backendUrl}/download_report`, '_blank')
+      }
+      if (saveChart.value) {
+        setTimeout(() => window.open(`${backendUrl}/download_chart`, '_blank'), 500)
+      }
+    }, 1500) // wait for backend to finish generating report
+
     setTimeout(() => { sessionSaved.value = false }, 5000)
   } catch (e) {
     console.error(e)
@@ -224,6 +265,87 @@ const setZero = async () => {
 
 const downloadReport = () => {
   try { window.open(`${backendUrl}/download_report`, '_blank') } catch (e) { console.error(e) }
+}
+
+const downloadChart = () => {
+  try { window.open(`${backendUrl}/download_chart`, '_blank') } catch (e) { console.error(e) }
+}
+
+const downloadFramesZip = () => {
+  try { window.open(`${backendUrl}/download_frames_zip`, '_blank') } catch (e) { console.error(e) }
+}
+
+// ============================================
+// LOCAL FOLDER SAVE (File System Access API)
+// ============================================
+const pickLocalFolder = async () => {
+  try {
+    if (!window.showDirectoryPicker) {
+      alert('Your browser does not support folder selection. Please use Chrome or Edge.')
+      return false
+    }
+    const handle = await window.showDirectoryPicker({ mode: 'readwrite' })
+    localSaveDirHandle.value = handle
+    return true
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      console.error('Folder picker error:', e)
+    }
+    return false
+  }
+}
+
+const startAutoSaving = () => {
+  if (autoSaveInterval) return
+  savedFrameCount = 0
+  autoSaveStatus.value = 'saving'
+
+  autoSaveInterval = setInterval(async () => {
+    if (!isRunning.value || !localSaveDirHandle.value) {
+      stopAutoSaving()
+      return
+    }
+
+    try {
+      const res = await fetch(`${backendUrl}/get_latest_frame`)
+      if (!res.ok) return
+
+      const contentType = res.headers.get('content-type')
+      if (!contentType || !contentType.includes('image')) return
+
+      const blob = await res.blob()
+      savedFrameCount++
+      const fileName = `frame_${String(savedFrameCount).padStart(5, '0')}.jpg`
+
+      const fileHandle = await localSaveDirHandle.value.getFileHandle(fileName, { create: true })
+      const writable = await fileHandle.createWritable()
+      await writable.write(blob)
+      await writable.close()
+
+      autoSaveStatus.value = 'saving'
+    } catch (e) {
+      console.error('Auto-save frame error:', e)
+      autoSaveStatus.value = 'error'
+    }
+  }, 1000) // every 1 second
+}
+
+const stopAutoSaving = () => {
+  if (autoSaveInterval) {
+    clearInterval(autoSaveInterval)
+    autoSaveInterval = null
+  }
+  autoSaveStatus.value = 'idle'
+}
+
+const fetchLogs = async (limit = 200) => {
+  try {
+    const res = await axios.get(`${backendUrl}/logs`, { params: { limit } })
+    return res.data
+  } catch (e) {
+    console.error('Failed to fetch logs:', e)
+    return { logs: [], total: 0, running: false }
+  }
 }
 
 const onAutoLightingChange = async () => {
@@ -304,12 +426,17 @@ export function useAppState() {
     hasRoi, currentRoi, roiFrameData,
     videoUrl,
     alertClass, alertTitle, alertMessage, isCriticalAlert,
+    // Save / Export config
+    outputFolder, saveFrames, saveExcel, saveChart, saveAll,
+    localSaveDirHandle, autoSaveStatus,
     // Smoothing
     smoothLevel,
     getSmoothedTarget: () => smoothedTarget,
     // API functions
     handleFileSelect, uploadVideo, checkCamera,
     startSystem, stopSystem, setZero, downloadReport,
+    downloadChart, downloadFramesZip, fetchLogs,
+    pickLocalFolder, startAutoSaving, stopAutoSaving,
     onAutoLightingChange, loadAutoLightingSettings, loadCurrentRoi,
     startPolling, stopPolling,
   }

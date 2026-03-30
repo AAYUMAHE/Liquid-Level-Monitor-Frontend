@@ -100,6 +100,51 @@
               </div>
             </div>
 
+            <!-- ========== EXPORT SETTINGS ========== -->
+            <div class="export-section">
+              <div class="section-divider">
+                <span class="divider-label">EXPORT SETTINGS</span>
+              </div>
+
+              <div class="input-group">
+                <label>Output Folder (on Pi)</label>
+                <input type="text" v-model="outputFolder" placeholder="session_output" />
+              </div>
+
+              <div class="input-group">
+                <label>Save to Local System</label>
+                <button class="folder-pick-btn" @click="handlePickFolder">
+                  <span class="folder-icon">📁</span>
+                  {{ localSaveDirHandle ? '✔ Folder Selected' : 'Select Local Folder' }}
+                </button>
+                <div v-if="localSaveDirHandle" class="folder-status">
+                  Frames will auto-save to your local folder every second
+                </div>
+              </div>
+
+              <div class="input-group">
+                <label>What to Save</label>
+                <div class="checkbox-group">
+                  <label class="checkbox-item">
+                    <input type="checkbox" v-model="saveAll" />
+                    <span class="checkbox-label">Save All</span>
+                  </label>
+                  <label class="checkbox-item">
+                    <input type="checkbox" v-model="saveFrames" />
+                    <span class="checkbox-label">Frames</span>
+                  </label>
+                  <label class="checkbox-item">
+                    <input type="checkbox" v-model="saveExcel" />
+                    <span class="checkbox-label">Excel Report</span>
+                  </label>
+                  <label class="checkbox-item">
+                    <input type="checkbox" v-model="saveChart" />
+                    <span class="checkbox-label">Trend Chart</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
             <div class="control-buttons mt-4">
               <button class="ctrl-btn back-btn" @click="goBack">
                 <span class="arrow-icon">←</span> BACK
@@ -164,8 +209,11 @@ const {
   cameraError, isCheckingCamera,
   autoLightingEnabled, claheClipLimit,
   hasRoi, currentRoi, roiFrameData,
+  outputFolder, saveFrames, saveExcel, saveChart, saveAll,
+  localSaveDirHandle,
   handleFileSelect, uploadVideo,
   startSystem, onAutoLightingChange, loadAutoLightingSettings, loadCurrentRoi,
+  pickLocalFolder,
 } = useAppState()
 
 // ROI local state
@@ -188,6 +236,10 @@ const handleStart = async () => {
   if (success) {
     router.push('/monitor')
   }
+}
+
+const handlePickFolder = async () => {
+  await pickLocalFolder()
 }
 
 // ============================================
@@ -898,6 +950,134 @@ onMounted(() => {
 
 .roi-btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0, 212, 255, 0.4); }
 .roi-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ========== EXPORT SETTINGS ========== */
+.export-section {
+  margin-top: 5px;
+}
+
+.section-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+
+.section-divider::before,
+.section-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.3), transparent);
+}
+
+.divider-label {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  color: #00d4ff;
+  letter-spacing: 2px;
+  white-space: nowrap;
+}
+
+.folder-pick-btn {
+  width: 100%;
+  padding: 10px 14px;
+  background: rgba(0, 20, 50, 0.5);
+  border: 1px dashed rgba(0, 212, 255, 0.3);
+  border-radius: 8px;
+  color: #88a;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.folder-pick-btn:hover {
+  border-color: #00d4ff;
+  color: #00d4ff;
+  background: rgba(0, 212, 255, 0.08);
+}
+
+.folder-icon {
+  font-size: 16px;
+}
+
+.folder-status {
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: rgba(0, 255, 136, 0.08);
+  border: 1px solid rgba(0, 255, 136, 0.25);
+  border-radius: 6px;
+  font-size: 11px;
+  color: #00ff88;
+  text-align: center;
+}
+
+.checkbox-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(0, 20, 50, 0.4);
+  border: 1px solid rgba(0, 212, 255, 0.15);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.checkbox-item:hover {
+  border-color: rgba(0, 212, 255, 0.35);
+  background: rgba(0, 212, 255, 0.05);
+}
+
+.checkbox-item input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(0, 212, 255, 0.4);
+  border-radius: 4px;
+  background: rgba(0, 10, 30, 0.5);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: all 0.3s;
+}
+
+.checkbox-item input[type="checkbox"]:checked {
+  background: rgba(0, 212, 255, 0.3);
+  border-color: #00d4ff;
+}
+
+.checkbox-item input[type="checkbox"]:checked::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #00d4ff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.checkbox-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #aab;
+  letter-spacing: 0.5px;
+}
 
 /* ========== RESPONSIVE ========== */
 @media (max-width: 900px) {

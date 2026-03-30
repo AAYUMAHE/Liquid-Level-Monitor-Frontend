@@ -75,6 +75,21 @@
               <button class="ctrl-btn download-btn full-width" @click="downloadReport">
                 <span class="btn-icon download-icon"></span> DOWNLOAD REPORT
               </button>
+              <button class="ctrl-btn export-btn full-width" @click="downloadChart">
+                <span class="btn-icon"></span> 📊 DOWNLOAD CHART
+              </button>
+              <button class="ctrl-btn export-btn full-width" @click="downloadFramesZip">
+                <span class="btn-icon"></span> 🗂️ DOWNLOAD FRAMES
+              </button>
+            </div>
+
+            <div v-if="autoSaveStatus === 'saving'" class="auto-save-indicator">
+              <span class="save-dot"></span>
+              <span>Auto-saving frames to local folder...</span>
+            </div>
+            <div v-if="autoSaveStatus === 'error'" class="auto-save-indicator error">
+              <span class="save-dot error"></span>
+              <span>Auto-save error — check folder permissions</span>
             </div>
           </div>
         </div>
@@ -104,7 +119,8 @@ const {
   alertClass, alertTitle, alertMessage, isCriticalAlert,
   sessionSaved,
   thresholdHigh, thresholdLow,
-  stopSystem, setZero, downloadReport,
+  autoSaveStatus,
+  stopSystem, setZero, downloadReport, downloadChart, downloadFramesZip,
   startPolling, stopPolling,
   smoothLevel, getSmoothedTarget,
 } = useAppState()
@@ -609,6 +625,46 @@ onUnmounted(() => {
 
 .download-btn { background: linear-gradient(135deg, #00d4ff, #0080ff); color: #fff; }
 .download-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(0, 212, 255, 0.4); }
+
+.export-btn { background: linear-gradient(135deg, #9933ff, #6600cc); color: #fff; }
+.export-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(153, 51, 255, 0.4); }
+
+.auto-save-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(0, 255, 136, 0.08);
+  border: 1px solid rgba(0, 255, 136, 0.25);
+  border-radius: 8px;
+  font-size: 11px;
+  color: #00ff88;
+  margin-top: 10px;
+}
+
+.auto-save-indicator.error {
+  background: rgba(255, 68, 102, 0.08);
+  border-color: rgba(255, 68, 102, 0.25);
+  color: #ff6b7a;
+}
+
+.save-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00ff88;
+  animation: savePulse 1s infinite;
+  flex-shrink: 0;
+}
+
+.save-dot.error {
+  background: #ff4466;
+}
+
+@keyframes savePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
 
 .btn-icon { width: 14px; height: 14px; background: currentColor; }
 
