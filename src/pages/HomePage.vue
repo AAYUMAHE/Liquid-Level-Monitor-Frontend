@@ -47,6 +47,15 @@
       </div>
 
     </div>
+
+    <!-- Error Modal -->
+    <ErrorModal
+      :visible="showFeedError"
+      title="Camera Unavailable"
+      :message="feedError"
+      type="error"
+      @close="showFeedError = false"
+    />
   </div>
 </template>
 
@@ -55,12 +64,14 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { useAppState } from '../composables/useAppState.js'
+import ErrorModal from '../components/ErrorModal.vue'
 
 const router = useRouter()
-const { backendUrl, selectedEstimator } = useAppState()
+const { backendUrl, selectedEstimator, checkCamera, cameraError, isCheckingCamera, cameraCheckAttempt } = useAppState()
 
 const feedSrc = ref(null)
 const feedError = ref('')
+const showFeedError = ref(false)
 let refreshTimer = null
 
 const fetchFrame = async () => {
@@ -75,7 +86,17 @@ const fetchFrame = async () => {
       feedError.value = res.data.message || 'No frame available'
     }
   } catch (e) {
-    feedError.value = 'Camera unavailable'
+    feedError.value = 'Camera unavailable — check connection to the device'
+  }
+}
+
+const runCameraCheck = async () => {
+  showFeedError.value = false
+  feedError.value = ''
+  const available = await checkCamera()
+  if (!available) {
+    feedError.value = cameraError.value
+    showFeedError.value = true
   }
 }
 
@@ -83,9 +104,15 @@ const proceed = () => {
   router.push('/setup')
 }
 
-onMounted(() => {
-  fetchFrame()
-  refreshTimer = setInterval(fetchFrame, 1000)
+onMounted(async () => {
+  // Run camera check with 5 retries every time the page mounts (including refresh)
+  await runCameraCheck()
+
+  // If camera is available, start fetching frames
+  if (!showFeedError.value) {
+    fetchFrame()
+    refreshTimer = setInterval(fetchFrame, 1000)
+  }
 })
 
 onUnmounted(() => {

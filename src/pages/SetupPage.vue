@@ -113,13 +113,21 @@
 
               <div class="input-group">
                 <label>Save to Local System</label>
-                <button class="folder-pick-btn" @click="handlePickFolder">
-                  <span class="folder-icon">📁</span>
-                  {{ localSaveDirHandle ? '✔ Folder Selected' : 'Select Local Folder' }}
-                </button>
-                <div v-if="localSaveDirHandle" class="folder-status">
-                  Frames will auto-save to your local folder every second
-                </div>
+                <template v-if="isSecureContext">
+                  <button class="folder-pick-btn" @click="handlePickFolder">
+                    <span class="folder-icon">📁</span>
+                    {{ localSaveDirHandle ? '✔ Folder Selected' : 'Select Local Folder' }}
+                  </button>
+                  <div v-if="localSaveDirHandle" class="folder-status">
+                    Frames will auto-save to your local folder every second
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="folder-fallback-notice">
+                    <span class="fallback-icon">ℹ️</span>
+                    Browser folder picker is not available over HTTP. Frames are saved on the Pi in the output folder above.
+                  </div>
+                </template>
               </div>
 
               <div class="input-group">
@@ -154,9 +162,7 @@
               </button>
             </div>
 
-            <div v-if="cameraError" class="camera-error mt-4">
-              <span class="error-icon"></span> {{ cameraError }}
-            </div>
+
           </div>
         </div>
 
@@ -191,14 +197,24 @@
         </div>
       </div>
     </div>
+
+    <!-- Error Modal -->
+    <ErrorModal
+      :visible="showErrorModal"
+      :title="errorModalTitle"
+      :message="errorModalMessage"
+      :type="errorModalType"
+      @close="closeErrorModal"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { useAppState } from '../composables/useAppState.js'
+import ErrorModal from '../components/ErrorModal.vue'
 
 const router = useRouter()
 const {
@@ -210,11 +226,41 @@ const {
   autoLightingEnabled, claheClipLimit,
   hasRoi, currentRoi, roiFrameData,
   outputFolder, saveFrames, saveExcel, saveChart, saveAll,
-  localSaveDirHandle,
+  localSaveDirHandle, isSecureContext,
   handleFileSelect, uploadVideo,
   startSystem, onAutoLightingChange, loadAutoLightingSettings, loadCurrentRoi,
   pickLocalFolder,
 } = useAppState()
+
+// Error modal state
+const showErrorModal = ref(false)
+const errorModalTitle = ref('')
+const errorModalMessage = ref('')
+const errorModalType = ref('error')
+
+const closeErrorModal = () => {
+  showErrorModal.value = false
+  cameraError.value = ''
+}
+
+// Watch for errors and show modal
+watch(cameraError, (val) => {
+  if (val) {
+    errorModalMessage.value = val
+    // Determine title and type based on message content
+    if (val.toLowerCase().includes('camera not found') || val.toLowerCase().includes('camera')) {
+      errorModalTitle.value = 'Camera Error'
+    } else if (val.toLowerCase().includes('connection')) {
+      errorModalTitle.value = 'Connection Error'
+    } else if (val.toLowerCase().includes('upload') || val.toLowerCase().includes('video')) {
+      errorModalTitle.value = 'Upload Error'
+    } else {
+      errorModalTitle.value = 'System Error'
+    }
+    errorModalType.value = 'error'
+    showErrorModal.value = true
+  }
+})
 
 // ROI local state
 const showRoiModal = ref(false)
@@ -239,7 +285,18 @@ const handleStart = async () => {
 }
 
 const handlePickFolder = async () => {
-  await pickLocalFolder()
+  const result = await pickLocalFolder()
+  if (result && !result.success && result.reason === 'unsupported') {
+    errorModalTitle.value = 'Feature Not Available'
+    errorModalMessage.value = 'The browser folder picker requires a secure connection (HTTPS or localhost). Frames are being saved on the Raspberry Pi in the configured output folder.'
+    errorModalType.value = 'warning'
+    showErrorModal.value = true
+  } else if (result && !result.success && result.reason === 'error') {
+    errorModalTitle.value = 'Folder Selection Error'
+    errorModalMessage.value = result.message || 'Failed to select folder'
+    errorModalType.value = 'error'
+    showErrorModal.value = true
+  }
 }
 
 // ============================================
@@ -755,45 +812,24 @@ onMounted(() => {
 
 .arrow-icon { font-size: 16px; }
 
-/* ========== CAMERA ERROR ========== */
-.camera-error {
+/* ========== FOLDER FALLBACK NOTICE ========== */
+.folder-fallback-notice {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  padding: 12px 15px;
-  background: rgba(255, 68, 102, 0.15);
-  border: 1px solid rgba(255, 68, 102, 0.4);
+  padding: 12px 14px;
+  background: rgba(0, 212, 255, 0.06);
+  border: 1px solid rgba(0, 212, 255, 0.2);
   border-radius: 8px;
-  color: #ff6b7a;
-  font-size: 13px;
-  font-weight: 600;
-  animation: errorFadeIn 0.3s ease-out;
+  font-size: 12px;
+  color: #8899aa;
+  line-height: 1.5;
 }
 
-.camera-error .error-icon {
-  width: 20px;
-  height: 20px;
-  background: #ff4466;
-  border-radius: 50%;
+.fallback-icon {
+  font-size: 14px;
   flex-shrink: 0;
-  position: relative;
-}
-
-.camera-error .error-icon::before,
-.camera-error .error-icon::after {
-  content: '';
-  position: absolute;
-  background: white;
-  top: 50%;
-  left: 50%;
-}
-
-.camera-error .error-icon::before { width: 2px; height: 8px; transform: translate(-50%, -70%); }
-.camera-error .error-icon::after { width: 2px; height: 2px; border-radius: 50%; transform: translate(-50%, 100%); }
-
-@keyframes errorFadeIn {
-  from { opacity: 0; transform: translateY(-5px); }
-  to { opacity: 1; transform: translateY(0); }
+  margin-top: 1px;
 }
 
 /* ========== BADGES ========== */

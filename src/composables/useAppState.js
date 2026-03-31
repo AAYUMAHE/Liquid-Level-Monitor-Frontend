@@ -4,7 +4,7 @@ import axios from 'axios'
 // ============================================
 // SINGLETON STATE (module-level refs)
 // ============================================
-const backendUrl = 'http://10.42.171.236:8000'
+const backendUrl = 'http://127.0.0.1:8000'
 
 const status = ref('IDLE')
 const isRunning = ref(false)
@@ -34,6 +34,8 @@ const trendData = ref([])
 // Camera state
 const cameraError = ref('')
 const isCheckingCamera = ref(false)
+const cameraCheckAttempt = ref(0)
+const MAX_CAMERA_RETRIES = 5
 
 // Auto Lighting state
 const autoLightingEnabled = ref(true)
@@ -53,6 +55,8 @@ const saveExcel = ref(true)
 const saveChart = ref(true)
 const localSaveDirHandle = ref(null)   // File System Access API directory handle
 const autoSaveStatus = ref('')         // 'saving' | 'idle' | 'error'
+const isSecureContext = ref(typeof window !== 'undefined' ? (window.isSecureContext ?? false) : false)
+const manualSavePath = ref('')         // fallback path when File System Access API unavailable
 let autoSaveInterval = null
 let savedFrameCount = 0
 
@@ -158,14 +162,32 @@ const checkCamera = async () => {
   try {
     isCheckingCamera.value = true
     cameraError.value = ''
-    const res = await axios.get(`${backendUrl}/check_camera`, { params: { index: 0 } })
-    if (!res.data.available) {
-      cameraError.value = res.data.message || 'Camera not found'
-      return false
+    cameraCheckAttempt.value = 0
+
+    for (let attempt = 1; attempt <= MAX_CAMERA_RETRIES; attempt++) {
+      cameraCheckAttempt.value = attempt
+      try {
+        const res = await axios.get(`${backendUrl}/check_camera`, { params: { index: 0 } })
+        if (res.data.available) {
+          cameraError.value = ''
+          return true
+        }
+        // Camera not available — store message but keep retrying
+        cameraError.value = res.data.message || 'Camera not found'
+      } catch (e) {
+        cameraError.value = 'Failed to check camera: ' + (e.response?.data?.detail || e.message)
+      }
+
+      // Wait 1 second before next retry (except after last attempt)
+      if (attempt < MAX_CAMERA_RETRIES) {
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
     }
-    return true
-  } catch (e) {
-    cameraError.value = 'Failed to check camera: ' + (e.response?.data?.detail || e.message)
+
+    // All retries exhausted — ensure a user-friendly message
+    if (!cameraError.value) {
+      cameraError.value = 'No working camera found. Please connect the camera or contact the developer.'
+    }
     return false
   } finally {
     isCheckingCamera.value = false
@@ -281,17 +303,18 @@ const downloadFramesZip = () => {
 const pickLocalFolder = async () => {
   try {
     if (!window.showDirectoryPicker) {
-      alert('Your browser does not support folder selection. Please use Chrome or Edge.')
-      return false
+      // File System Access API unavailable (non-secure context like http://IP:port)
+      return { success: false, reason: 'unsupported' }
     }
     const handle = await window.showDirectoryPicker({ mode: 'readwrite' })
     localSaveDirHandle.value = handle
-    return true
+    return { success: true }
   } catch (e) {
     if (e.name !== 'AbortError') {
       console.error('Folder picker error:', e)
+      return { success: false, reason: 'error', message: e.message }
     }
-    return false
+    return { success: false, reason: 'cancelled' }
   }
 }
 
@@ -421,7 +444,7 @@ export function useAppState() {
     level, levelDisplay, fps, frameCount, processingTime,
     uploadedFile, uploadedFilePath, isUploading, uploadMessage, uploadMessageType,
     sessionSaved, trendData,
-    cameraError, isCheckingCamera,
+    cameraError, isCheckingCamera, cameraCheckAttempt,
     autoLightingEnabled, claheClipLimit,
     hasRoi, currentRoi, roiFrameData,
     videoUrl,
@@ -429,6 +452,7 @@ export function useAppState() {
     // Save / Export config
     outputFolder, saveFrames, saveExcel, saveChart, saveAll,
     localSaveDirHandle, autoSaveStatus,
+    isSecureContext, manualSavePath,
     // Smoothing
     smoothLevel,
     getSmoothedTarget: () => smoothedTarget,
