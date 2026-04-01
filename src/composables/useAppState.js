@@ -4,7 +4,11 @@ import axios from 'axios'
 // ============================================
 // SINGLETON STATE (module-level refs)
 // ============================================
-const backendUrl = 'http://127.0.0.1:8000'
+// Auto-detect backend URL from the current page's protocol + hostname
+// Works for: localhost dev, http://pi-ip:8000, https://pi-ip:8000
+const backendUrl = typeof window !== 'undefined'
+  ? `${window.location.protocol}//${window.location.hostname}:8000`
+  : 'http://127.0.0.1:8000'
 
 const status = ref('IDLE')
 const isRunning = ref(false)
@@ -129,6 +133,63 @@ const smoothLevel = (newLevel) => {
 }
 
 // ============================================
+// ALERT SOUND (Web Audio API – no file needed)
+// ============================================
+let lastAlertTime = 0
+const ALERT_COOLDOWN_MS = 3000  // prevent rapid-fire beeps
+
+const playAlertSound = () => {
+  try {
+    const now = Date.now()
+    if (now - lastAlertTime < ALERT_COOLDOWN_MS) return
+    lastAlertTime = now
+
+    const ctx = new (window.AudioContext || window.webkitAudioContext)()
+
+    // First tone — high beep
+    const osc1 = ctx.createOscillator()
+    const gain1 = ctx.createGain()
+    osc1.type = 'square'
+    osc1.frequency.value = 880
+    gain1.gain.setValueAtTime(0.3, ctx.currentTime)
+    gain1.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25)
+    osc1.connect(gain1)
+    gain1.connect(ctx.destination)
+    osc1.start(ctx.currentTime)
+    osc1.stop(ctx.currentTime + 0.25)
+
+    // Second tone — lower beep after a short gap
+    const osc2 = ctx.createOscillator()
+    const gain2 = ctx.createGain()
+    osc2.type = 'square'
+    osc2.frequency.value = 660
+    gain2.gain.setValueAtTime(0.3, ctx.currentTime + 0.3)
+    gain2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.55)
+    osc2.connect(gain2)
+    gain2.connect(ctx.destination)
+    osc2.start(ctx.currentTime + 0.3)
+    osc2.stop(ctx.currentTime + 0.55)
+
+    // Third tone — urgent low beep
+    const osc3 = ctx.createOscillator()
+    const gain3 = ctx.createGain()
+    osc3.type = 'square'
+    osc3.frequency.value = 440
+    gain3.gain.setValueAtTime(0.35, ctx.currentTime + 0.6)
+    gain3.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.9)
+    osc3.connect(gain3)
+    gain3.connect(ctx.destination)
+    osc3.start(ctx.currentTime + 0.6)
+    osc3.stop(ctx.currentTime + 0.9)
+
+    // Clean up AudioContext after sounds finish
+    setTimeout(() => ctx.close(), 1500)
+  } catch (e) {
+    console.warn('Alert sound not available:', e)
+  }
+}
+
+// ============================================
 // API FUNCTIONS
 // ============================================
 const handleFileSelect = (event) => {
@@ -163,6 +224,7 @@ const checkCamera = async () => {
     isCheckingCamera.value = true
     cameraError.value = ''
     cameraCheckAttempt.value = 0
+    let lastError = ''
 
     for (let attempt = 1; attempt <= MAX_CAMERA_RETRIES; attempt++) {
       cameraCheckAttempt.value = attempt
@@ -172,10 +234,10 @@ const checkCamera = async () => {
           cameraError.value = ''
           return true
         }
-        // Camera not available — store message but keep retrying
-        cameraError.value = res.data.message || 'Camera not found'
+        // Camera not available — store message locally but keep retrying
+        lastError = res.data.message || 'Camera not found'
       } catch (e) {
-        cameraError.value = 'Failed to check camera: ' + (e.response?.data?.detail || e.message)
+        lastError = 'Failed to check camera: ' + (e.response?.data?.detail || e.message)
       }
 
       // Wait 1 second before next retry (except after last attempt)
@@ -184,10 +246,9 @@ const checkCamera = async () => {
       }
     }
 
-    // All retries exhausted — ensure a user-friendly message
-    if (!cameraError.value) {
-      cameraError.value = 'No working camera found. Please connect the camera or contact the developer.'
-    }
+    // All retries exhausted — set error once and play sound once
+    cameraError.value = lastError || 'No working camera found. Please connect the camera or contact the developer.'
+    playAlertSound()
     return false
   } finally {
     isCheckingCamera.value = false
@@ -268,10 +329,10 @@ const stopSystem = async () => {
     // Auto-download selected items after session ends
     setTimeout(async () => {
       if (saveExcel.value) {
-        window.open(`${backendUrl}/download_report`, '_blank')
+        await downloadFile(`${backendUrl}/download_report`, 'Final_Report.xlsx')
       }
       if (saveChart.value) {
-        setTimeout(() => window.open(`${backendUrl}/download_chart`, '_blank'), 500)
+        await downloadFile(`${backendUrl}/download_chart`, 'Live_Trend_Graph.png')
       }
     }, 1500) // wait for backend to finish generating report
 
@@ -285,16 +346,34 @@ const setZero = async () => {
   try { await axios.post(`${backendUrl}/set_zero`) } catch (e) { console.error(e) }
 }
 
+const downloadFile = async (url, filename) => {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`Download failed: ${res.status}`)
+    const blob = await res.blob()
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(blobUrl)
+  } catch (e) {
+    console.error('Download error:', e)
+  }
+}
+
 const downloadReport = () => {
-  try { window.open(`${backendUrl}/download_report`, '_blank') } catch (e) { console.error(e) }
+  try { downloadFile(`${backendUrl}/download_report`, 'Final_Report.xlsx') } catch (e) { console.error(e) }
 }
 
 const downloadChart = () => {
-  try { window.open(`${backendUrl}/download_chart`, '_blank') } catch (e) { console.error(e) }
+  try { downloadFile(`${backendUrl}/download_chart`, 'Trend_Graph.png') } catch (e) { console.error(e) }
 }
 
 const downloadFramesZip = () => {
-  try { window.open(`${backendUrl}/download_frames_zip`, '_blank') } catch (e) { console.error(e) }
+  try { downloadFile(`${backendUrl}/download_frames_zip`, 'Processed_Frames.zip') } catch (e) { console.error(e) }
 }
 
 // ============================================
@@ -418,10 +497,19 @@ const startPolling = () => {
       frameCount.value = res.data.frame_count || 0
       processingTime.value = (res.data.processing_time || 0) * 1000
       if (res.data.running === false && isRunning.value) {
+        playAlertSound()
+        cameraError.value = 'Camera disconnected or source ended unexpectedly.'
         stopSystem()
         status.value = 'SOURCE ENDED'
       }
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      // Connection lost to backend — likely Pi network issue
+      if (isRunning.value) {
+        playAlertSound()
+        cameraError.value = 'Lost connection to backend. Check if the Pi is reachable.'
+      }
+    }
   }, 100)
 }
 
@@ -454,7 +542,7 @@ export function useAppState() {
     localSaveDirHandle, autoSaveStatus,
     isSecureContext, manualSavePath,
     // Smoothing
-    smoothLevel,
+    smoothLevel, playAlertSound,
     getSmoothedTarget: () => smoothedTarget,
     // API functions
     handleFileSelect, uploadVideo, checkCamera,
